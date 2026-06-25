@@ -21,7 +21,7 @@ Requires the nightly toolchain (`rustup toolchain install nightly`) since the em
 
 ## Config
 
-The `rustfmt.toml` is embedded in `src/main.rs` and intentionally overrides any project-local rustfmt config. Edit and reinstall to change it.
+The default `rustfmt.toml` is embedded in `src/main.rs`. If the workspace root has `rustfmt.toml` or `.rustfmt.toml`, local values override the embedded defaults and missing values fall back to the embedded config.
 
 ## License
 
