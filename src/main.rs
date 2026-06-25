@@ -2,14 +2,14 @@ use std::{
     collections::HashSet,
     env::{args, current_dir, temp_dir},
     fs::{read_dir, read_to_string},
-    io::{self, Write},
+    io::{Error, ErrorKind, Result, Write},
     path::{Path, PathBuf},
     process::{Command, ExitCode},
 };
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use tempfile::{Builder, NamedTempFile};
-use toml::Value;
+use toml::{Table, Value, to_string_pretty};
 
 const RUSTFMT_TOML: &str = r#"# https://github.com/rust-lang/rustfmt/blob/master/Configurations.md
 chain_width = 70
@@ -43,18 +43,12 @@ fn main() -> ExitCode {
         .args(cargo_fmt_args)
         .status();
 
-    result.map_or(ExitCode::FAILURE, |s| {
-        ExitCode::from(s.code().unwrap_or(1) as u8)
-    })
+    result.map_or(ExitCode::FAILURE, |s| ExitCode::from(s.code().unwrap_or(1) as u8))
 }
 
-fn rustfmt_config() -> std::io::Result<NamedTempFile> {
+fn rustfmt_config() -> Result<NamedTempFile> {
     let root = current_dir().ok().and_then(find_git_root);
-    let local_config = root
-        .as_deref()
-        .map(load_local_rustfmt_config)
-        .transpose()?
-        .flatten();
+    let local_config = root.as_deref().map(load_local_rustfmt_config).transpose()?.flatten();
     let ignored = root
         .as_deref()
         .and_then(|root| load_gitattributes(root).map(|gitattributes| (root, gitattributes)))
@@ -75,12 +69,8 @@ fn rustfmt_config() -> std::io::Result<NamedTempFile> {
     config_file_in(config_dir, hidden, &config)
 }
 
-fn config_file_in(dir: PathBuf, hidden: bool, config: &str) -> std::io::Result<NamedTempFile> {
-    let prefix = if hidden {
-        ".cargo-myfmt-"
-    } else {
-        "cargo-myfmt-"
-    };
+fn config_file_in(dir: PathBuf, hidden: bool, config: &str) -> Result<NamedTempFile> {
+    let prefix = if hidden { ".cargo-myfmt-" } else { "cargo-myfmt-" };
     let mut file = Builder::new()
         .prefix(prefix)
         .suffix("-rustfmt.toml")
@@ -96,7 +86,7 @@ struct LocalRustfmtConfig {
     content: String,
 }
 
-fn load_local_rustfmt_config(root: &Path) -> std::io::Result<Option<LocalRustfmtConfig>> {
+fn load_local_rustfmt_config(root: &Path) -> Result<Option<LocalRustfmtConfig>> {
     for name in ["rustfmt.toml", ".rustfmt.toml"] {
         let path = root.join(name);
         if path.exists() {
@@ -108,10 +98,7 @@ fn load_local_rustfmt_config(root: &Path) -> std::io::Result<Option<LocalRustfmt
     Ok(None)
 }
 
-fn merged_rustfmt_config(
-    local_config: Option<&str>,
-    ignored: &[PathBuf],
-) -> std::io::Result<String> {
+fn merged_rustfmt_config(local_config: Option<&str>, ignored: &[PathBuf]) -> Result<String> {
     let mut merged = parse_rustfmt_config(RUSTFMT_TOML)?;
 
     if let Some(local_config) = local_config {
@@ -122,26 +109,22 @@ fn merged_rustfmt_config(
 
     append_ignored_files(&mut merged, ignored);
 
-    toml::to_string_pretty(&merged)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    to_string_pretty(&merged).map_err(|error| Error::new(ErrorKind::InvalidData, error))
 }
 
-fn parse_rustfmt_config(config: &str) -> std::io::Result<toml::Table> {
+fn parse_rustfmt_config(config: &str) -> Result<Table> {
     config
         .parse()
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        .map_err(|error| Error::new(ErrorKind::InvalidData, error))
 }
 
-fn append_ignored_files(config: &mut toml::Table, ignored: &[PathBuf]) {
+fn append_ignored_files(config: &mut Table, ignored: &[PathBuf]) {
     if ignored.is_empty() {
         return;
     }
 
     let Some(ignore) = config.remove("ignore") else {
-        config.insert(
-            "ignore".to_owned(),
-            ignored_files_value(Vec::new(), ignored),
-        );
+        config.insert("ignore".to_owned(), ignored_files_value(Vec::new(), ignored));
         return;
     };
 
@@ -154,11 +137,8 @@ fn append_ignored_files(config: &mut toml::Table, ignored: &[PathBuf]) {
 }
 
 fn ignored_files_value(mut existing: Vec<Value>, ignored: &[PathBuf]) -> Value {
-    let mut seen: HashSet<String> = existing
-        .iter()
-        .filter_map(Value::as_str)
-        .map(str::to_owned)
-        .collect();
+    let mut seen: HashSet<String> =
+        existing.iter().filter_map(Value::as_str).map(str::to_owned).collect();
 
     for path in ignored {
         let path = path.display().to_string();
@@ -210,8 +190,7 @@ impl GitAttrMatcher {
         self.globset
             .matches(path)
             .last()
-            .map(|&idx| self.generated[idx])
-            .unwrap_or(false)
+            .is_some_and(|&idx| self.generated[idx])
     }
 }
 
@@ -315,14 +294,14 @@ fn collect_generated_rust_files(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(test)]
+    use toml::Table;
+
     use super::*;
 
     #[test]
     fn appends_config_path_after_existing_separator() {
-        let args = cargo_fmt_args(
-            &["--".to_owned(), "--check".to_owned()],
-            Path::new("/tmp/cfg"),
-        );
+        let args = cargo_fmt_args(&["--".to_owned(), "--check".to_owned()], Path::new("/tmp/cfg"));
         assert_eq!(args, ["--", "--check", "--config-path", "/tmp/cfg"]);
     }
 
@@ -363,7 +342,7 @@ mod tests {
     #[test]
     fn local_config_overrides_embedded_defaults() {
         let config = merged_rustfmt_config(Some("max_width = 120\n"), &[]).unwrap();
-        let parsed: toml::Table = config.parse().unwrap();
+        let parsed: Table = config.parse().unwrap();
 
         assert_eq!(parsed["max_width"].as_integer(), Some(120));
         assert_eq!(parsed["chain_width"].as_integer(), Some(70));
@@ -373,13 +352,10 @@ mod tests {
     fn generated_ignores_are_added_to_local_ignore() {
         let config = merged_rustfmt_config(
             Some("ignore = [\"src/local.rs\"]\n"),
-            &[
-                PathBuf::from("src/generated.rs"),
-                PathBuf::from("src/local.rs"),
-            ],
+            &[PathBuf::from("src/generated.rs"), PathBuf::from("src/local.rs")],
         )
         .unwrap();
-        let parsed: toml::Table = config.parse().unwrap();
+        let parsed: Table = config.parse().unwrap();
         let ignored: Vec<_> = parsed["ignore"]
             .as_array()
             .unwrap()
