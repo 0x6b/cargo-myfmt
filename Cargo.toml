@@ -1,7 +1,12 @@
 [package]
 name = "cargo-myfmt"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+
+[dependencies]
+globset = { version = "0.4", default-features = false }
+tempfile = "3.27"
+toml = "1.1"
 
 [profile.release]
 lto = true

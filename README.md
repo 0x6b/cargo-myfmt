@@ -1,8 +1,8 @@
 # cargo-myfmt
 
-A `cargo` subcommand that runs `cargo +nightly fmt` with a personal `rustfmt.toml` config, without polluting the project tree.
+A `cargo` subcommand that runs `cargo +nightly fmt` with a personal `rustfmt.toml` config, without keeping that config in the project tree.
 
-It writes the embedded config to a tempfile, invokes `cargo +nightly fmt -- --config-path <tempfile>`, then removes it.
+It writes the embedded config to a temporary file, invokes `cargo +nightly fmt -- --config-path <tempfile>`, then removes it. If the workspace root has a `.gitattributes`, Rust files marked with `linguist-generated` or `linguist-generated=true` are skipped.
 
 ## Install
 
@@ -21,7 +21,7 @@ Requires the nightly toolchain (`rustup toolchain install nightly`) since the em
 
 ## Config
 
-The `rustfmt.toml` is embedded in `src/main.rs`. Edit and reinstall to change it.
+The default `rustfmt.toml` is embedded in `src/main.rs`. If the workspace root has `rustfmt.toml` or `.rustfmt.toml`, local values override the embedded defaults and missing values fall back to the embedded config.
 
 ## License
 
